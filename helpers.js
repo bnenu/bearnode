@@ -5,7 +5,7 @@
  */
 
 const curry2 = fn => (x, ...args) => {
-  return args.length > 0 
+  return args.length > 0
     ? fn(x, ...args)
     : (...y) => fn(x, ...y)
 }
@@ -63,7 +63,21 @@ const pick =
         (acc, key) => assoc(acc)(objOf(key)(obj[key])), {}
       )
   )
+// omit :: [ String ] -> {} -> {}
+const omit =
+  curry2(
+    (keys, obj) => {
+      let n = {}
 
+      for(let k in obj) {
+        if(!(keys.indexOf(k) > -1)){
+          n[k] = obj[k]
+        }
+      }
+
+      return n
+    }
+  )
 // mapObj :: (a -> b) -> {} -> {}
 const mapObj = curry2(
   (fn, obj) => {
@@ -144,6 +158,8 @@ const isSameType = (M, x) => M['@@type'] === x['@@type']
 // Maybe
 const Just = val => ({
   toString: () => `Just(${val})`,
+  isJust: () => true,
+  isNothing: () => false,
   map: fn => Just(fn(val)),
   chain: fn => fn(val),
   ap: M => M.map(val),
@@ -153,6 +169,8 @@ const Just = val => ({
 
 const Nothing = () => ({
   toString: () => 'Nothing',
+  isJust: () => false,
+  isNothing: () => true,
   map: () => Nothing(),
   chain: () => Nothing(),
   ap: () => Nothing(),
@@ -171,7 +189,10 @@ const Maybe = {
 
 // Reader
 const Reader = function Reader(runWith) {
+  const _of = x => Reader(() => x)
+
   return {
+    of: _of,
     runWith: runWith,
     map: fn => Reader(compose(fn, runWith)),
     chain: fn => Reader(env => fn(runWith(env)).runWith(env)),
@@ -179,24 +200,52 @@ const Reader = function Reader(runWith) {
   }
 }
 
-Reader.prototype.of = function (runWith) {
-  return Reader(runWith)
-}
-
 // Async
 const Async = function(fn) {
   const _of = x => Async((_, resolve) => resolve(x))
   const fork = (reject, resolve) => fn(x => reject(x), x => resolve(x))
-  const map = f => Async((rej, res) => fork(rej, compose(res, f)))
+  const map = f => Async((rej, res) => fork(
+    rej,
+    compose(res, f))
+  )
   const chain = f => Async((rej, res) => fork(rej, x => f(x).fork(rej, res)))
+
+  const alt = A => Async((rej, res) => fork(
+    () => A.fork(rej, res),
+    res
+  ))
+
+  const bimap = (f, g) => Async((rej, res) => fork(
+    compose(rej, f),
+    compose(res, g)
+  ))
 
   return {
     of: _of,
     fork: fork,
     map: map,
-    chain: chain
+    chain: chain,
+    alt: alt,
+    bimap: bimap
   }
 }
+
+// maybeToAsync :: a -> Maybe b -> Async a b
+const maybeToAsync =
+  rejectionOpt => Maybe =>
+    Async((rej, res) => {
+      Maybe.isJust() ? res(Maybe.option()) : rej(rejectionOpt)
+    })
+
+const A = Async((rej, res) => {
+  //rej('Reject A')
+  res(false)
+})
+const B = x => Async((rej, res) => {
+  x ? res('Resolve B') : rej('Reject B')
+})
+
+A.chain(x => B(x)).fork(log, log)
 
 // Monoids
 const All = (val) => ({
@@ -239,7 +288,7 @@ const reduceWith = M => (acc, val) => acc.concat(M(val))
 
 // mconcat :: Monoid m => m -> [ a ] -> m a
 const mconcat =
-  M => xs => 
+  M => xs =>
     xs.reduce(
       reduceWith(compose(M, x => x)),
       M().empty()
@@ -249,7 +298,7 @@ const mconcat =
 const mconcatMap =
   M => fn => xs =>
     xs.reduce(
-      reduceWith(compose(M, fn)), 
+      reduceWith(compose(M, fn)),
       M().empty()
     )
 
@@ -364,9 +413,9 @@ const createRandomString = len => {
 
 module.exports = {
   All, Maybe, First, Last, Reader, Async,
-  assoc, chain, compose, composePreds, contains, constant, createRandomString, curry2, curry3, 
+  assoc, chain, compose, composePreds, contains, constant, createRandomString, curry2, curry3,
   hasMinLen, identity, ifElse,
   isArray, isType, isTrue, isFalse, isNil, isNotNil, flip, log,
-  map, mapProps, mapObj, match, mconcat, mconcatMap, mreduceMap, not, objOf, parseJsonToObj, pick, pmatch, prop, replace,
+  map, mapProps, mapObj, match, maybeToAsync, mconcat, mconcatMap, mreduceMap, not, objOf, omit, parseJsonToObj, pick, pmatch, prop, replace,
   safeIs, safeProp, stringify, tap, tagValue, trim
 }
